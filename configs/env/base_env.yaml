@@ -1,0 +1,37 @@
+type: env
+
+n_warehouses: 3
+n_skus: 20
+episode_length: 365
+
+init_inv_mean: 10
+init_inv_std: 2
+
+holding_costs: [1, 2, 3]
+lost_sales_costs: 5.0
+shipment_costs:
+    - [0.0, 1.0, 2.0]
+    - [1.0, 0.0, 1.0]
+    - [2.0, 1.0, 0.0]
+
+demand_sampler:
+  model: Possion
+  lambda_per_sku: [2.0, 1.5, 0.5]
+
+demand_allocator:
+  model: Greedy
+
+lead_time_sampler:
+  model: Gamma
+  max_lead_time: 10
+  alpha: 2.0
+  beta: 1.0
+
+
+
+
+
+
+
+
+

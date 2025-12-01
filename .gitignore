@@ -1,0 +1,12 @@
+.idea
+.DS_store
+*.pyrc
+*.pyc
+*.pyo
+*.env
+/config/*.yml
+
+/data
+/dump
+.*venv*/
+*.log
