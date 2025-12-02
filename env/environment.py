@@ -7,9 +7,9 @@ import numpy as np
 from pettingzoo.utils import ParallelEnv
 from gymnasium import spaces
 
-from components.demand_sampler import build_demand_sampler
-from components.demand_allocator import build_demand_allocator
-from components.lead_time_sampler import build_lead_time_sampler
+from env.components.demand_sampler import build_demand_sampler
+from env.components.demand_allocator import build_demand_allocator
+# from components.lead_time_sampler import build_lead_time_sampler
 
 class InventoryEnv(ParallelEnv):
 
@@ -22,10 +22,11 @@ class InventoryEnv(ParallelEnv):
         self.n_skus = env_config["n_skus"]
         self.episode_length = env_config.get("episode_length", 365)
 
+        # TODO: Add lead_time_sampler
         # External components
-        self.demand_sampler = build_demand_sampler(env_config["demand_sampler"])
-        self.demand_allocator = build_demand_allocator(env_config["demand_allocator"])
-        self.lead_time_sampler = build_lead_time_sampler(env_config["lead_time_sampler"])
+        self.demand_sampler = build_demand_sampler(env_config)
+        self.demand_allocator = build_demand_allocator(env_config)
+        # self.lead_time_sampler = build_lead_time_sampler(env_config)
 
         # TODO: specify cost parameters
         # Costs
@@ -41,7 +42,7 @@ class InventoryEnv(ParallelEnv):
         # Agent information
         self.possible_agents = [f"warehouse_{i}" for i in range(self.n_warehouses)]
         self.agent_ids = list(range(len(self.possible_agents)))
-        self.agent_id_mapping = dict(zip(self.agents, self.agent_ids))
+        self.agent_id_mapping = dict(zip(self.possible_agents, self.agent_ids))
         self.observation_spaces = self._build_observation_spaces()
         self.action_spaces = self._build_action_spaces()
 
@@ -49,7 +50,6 @@ class InventoryEnv(ParallelEnv):
         # State information
         self.inventory = None
         self.pipeline = None
-        self.episode_demand = None
         self.timestep  = None
         self.terminated = False
 
@@ -74,8 +74,8 @@ class InventoryEnv(ParallelEnv):
         # Reset pipeline
         self.pipeline = np.zeros((self.n_warehouses, self.n_skus, self.episode_length), dtype=np.int64)
 
-        # Sample orders for the entire episode
-        self.episode_demand = self.demand_sampler.sample(self.episode_length)
+        # Reset demand sampler
+        self.demand_sampler.reset(self.episode_length)
 
         # Get initial observations
         obs = self._get_observations()
@@ -99,20 +99,22 @@ class InventoryEnv(ParallelEnv):
 
         # TODO: Adjust terminal behaviour, evtl. run _terminal_step()  on the bottom when terminated is set and
         # check termination in outside loop
-        if self.terminated:
-            return self._terminal_step()
+        #if self.terminated:
+        #    return self._terminal_step()
+#
+        ## Apply actions
+        #self._apply_actions(actions)
+#
+        ## Shipments arrive
+        #self._apply_arrivals()
 
-        # Apply actions
-        self._apply_actions(actions)
+        # Sample demand
+        order_batch = self.demand_sampler.sample_timestep(self.timestep) # OrderBatch()
+        print(order_batch)
 
-        # Shipments arrive
-        self._apply_arrivals()
-
+        # TODO: adjust allocation to fit data
         # Allocate demand
-        # TODO: adjust demand sampling and allocation to fit data.
-        # Right now, demand = no orders but just requested SKUs per demand region/warehouse
-        demand = self.episode_demand[self.timestep] # [W, K]
-        alloc_results = self.demand_allocator.allocate(inventory=self.inventory, demand=demand) # [shipped, lost_sales]
+        alloc_results = self.demand_allocator.allocate(inventory=self.inventory, demand=order_batch) # [shipped, lost_sales]
         shipped = alloc_results.shipped # [W_from, R_to, K]
         shipped_per_wh = shipped.sum(axis=1)
         lost_sales = alloc_results.lost_sales # [W, K]
@@ -149,20 +151,20 @@ class InventoryEnv(ParallelEnv):
 
         # TODO: Adjust low and high for actual observation space
         # TODO: Add feature config if applicable
-        low = np.concatenate(
+        low = np.concatenate([
             np.zeros(self.n_skus, dtype=np.float32),  # inv >= 0
             np.zeros(self.n_skus, dtype=np.float32),  # pipeline >= 0
             np.array([0], dtype=np.float32)  # normalized time step in [0, 1]
-        )
-        high = np.concatenate(
+        ])
+        high = np.concatenate([
             np.full(self.n_skus, 1e6, dtype=np.float32),  # inv >= 0
             np.full(self.n_skus, 1e6, dtype=np.float32),  # pipeline >= 0
             np.array([1], dtype=np.float32)  # normalized time step in [0, 1]
-        )
+        ])
 
         box = spaces.Box(low=low, high=high, dtype=np.float32)
 
-        return {agent: box for agent in self.agents}
+        return {agent: box for agent in self.possible_agents}
 
     def observation_space(self, agent):
         return self.observation_spaces[agent]
@@ -180,7 +182,7 @@ class InventoryEnv(ParallelEnv):
 
         box = spaces.Box(low=low, high=high, dtype=np.float32)
 
-        return {agent: box for agent in self.agents}
+        return {agent: box for agent in self.possible_agents}
 
     def action_space(self, agent):
         return self.action_spaces[agent]
@@ -197,7 +199,7 @@ class InventoryEnv(ParallelEnv):
         for agent_id, agent in enumerate(self.agents):
             inv = self.inventory[agent_id]
             pipe = pipeline_total[agent_id]
-            obs[agent] = np.concatenate(inv, pipe, timestep_norm).astype(np.float32)
+            obs[agent] = np.concatenate([inv, pipe, timestep_norm]).astype(np.float32)
         return obs
 
     def _terminal_step(self):

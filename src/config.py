@@ -1,8 +1,8 @@
-from typing import Callable, Optional, cast
+from typing import Callable, Optional, Any, cast
+from unittest import removeResult
 
 import yaml
 import numpy as np
-from numpy.f2py.auxfuncs import requiresf90wrapper
 
 from env.components.components import COMPONENT_REGISTRY
 
@@ -53,7 +53,6 @@ def _validate_core_env_fields(env_config):
             raise ValueError(f"Field {field} in env_config must be a positive integer, got {value}.")
 
     n_warehouses = env_config["n_warehouses"]
-    n_skus = env_config["n_skus"]
 
     # Check initial inventory parameters for type
     if "init_inv_mean" in env_config:
@@ -71,17 +70,17 @@ def _validate_core_env_fields(env_config):
 
     # Check cost fields for type and shape
     for cost in ["holding_costs", "lost_sales_costs", "shipment_costs"]:
-        array = np.asarray(env_config[cost])
-        if not np.issubdtype(array.dtype, np.number) or np.any(array < 0):
-            raise ValueError(f"{cost} in env_config must be positive number(s), got {array}")
-        if cost == "shipment_costs" and array.shape != (n_warehouses, n_warehouses):
+        cost_array = np.asarray(env_config[cost])
+        if not np.issubdtype(cost_array.dtype, np.number) or np.any(cost_array < 0):
+            raise ValueError(f"{cost} in env_config must be positive number(s), got {cost_array}")
+        if cost == "shipment_costs" and cost_array.shape != (n_warehouses, n_warehouses):
             raise ValueError(
                 f"{cost} must have shape scalar () or (n_warehouses, n_warehouses)={(n_warehouses, n_warehouses)}, "
-                f" got {array.shape}."
+                f" got {cost_array.shape}."
             )
-        if cost != "shipment_costs" and array.shape not in [(), (n_warehouses,)]:
+        if cost != "shipment_costs" and cost_array.shape not in [(), (n_warehouses,)]:
             raise ValueError(
-                f"{cost} must have shape scalar () or (n_warehouses,)={(n_warehouses, )}, got {array.shape}."
+                f"{cost} must have shape scalar () or (n_warehouses,)={(n_warehouses, )}, got {cost_array.shape}."
             )
 
 def _validate_env_component(component, registry, env_config):
@@ -102,6 +101,7 @@ def _validate_env_component(component, registry, env_config):
 
     # Check if all required parameters for the component model are provided
     required_params = model_specs.get("required_params") or []
+    print(required_params)
     missing = [param for param in required_params if param not in comp_config]
     if missing:
         raise ValueError(
@@ -118,7 +118,9 @@ def _validate_env_component(component, registry, env_config):
             f"Allowed parameter(s): {allowed}."
         )
 
-    # Validate model-specific parameters for shape consistency, if present
-    validate = cast(Optional[Callable[[], None]], model_specs["validate"])
+    params = {name: comp_config[name] for name in comp_config}
+
+    # Validate model-specific parameters for shape and type consistency, if present
+    validate = cast(Optional[Callable[[dict, dict], None]], model_specs["validate"])
     if validate is not None:
-        validate()
+        validate(params, env_config)

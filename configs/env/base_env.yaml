@@ -1,7 +1,7 @@
 type: env
 
 n_warehouses: 3
-n_skus: 20
+n_skus: 5
 episode_length: 365
 
 init_inv_mean: 10
@@ -15,8 +15,9 @@ shipment_costs:
     - [2.0, 1.0, 0.0]
 
 demand_sampler:
-  model: Possion
-  lambda_per_sku: [2.0, 1.5, 0.5]
+  model: Poisson
+  lambda_orders: 10
+  lambda_skus: [1,1,1,1,1]
 
 demand_allocator:
   model: Greedy

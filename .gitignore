@@ -6,7 +6,10 @@
 *.env
 /config/*.yml
 
-/data
+data/*
+!data/
+!data/demand_schema.py
+!data/preprocessing.py
 /dump
 .*venv*/
 *.log
