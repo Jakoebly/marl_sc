@@ -110,20 +110,20 @@ class InventoryEnv(ParallelEnv):
 
         # Sample demand
         order_batch = self.demand_sampler.sample_timestep(self.timestep) # OrderBatch()
-        print(order_batch)
 
-        # TODO: adjust allocation to fit data
-        # Allocate demand
-        alloc_results = self.demand_allocator.allocate(inventory=self.inventory, demand=order_batch) # [shipped, lost_sales]
-        shipped = alloc_results.shipped # [W_from, R_to, K]
-        shipped_per_wh = shipped.sum(axis=1)
-        lost_sales = alloc_results.lost_sales # [W, K]
+        # Allocate and ship demand
+        alloc_results = self.demand_allocator.allocate(inventory=self.inventory, demand=order_batch)
+        shipped_skus = alloc_results.shipped_skus
+        shipped_per_wh = shipped_skus.sum(axis=1)
+        shipment_counts = alloc_results.shipment_counts
+        lost_sales = alloc_results.lost_sales
+
 
         # Apply shipments
         self.inventory = np.maximum(self.inventory - shipped_per_wh, 0)
 
         # Compute rewards
-        rewards = self._compute_rewards(shipped, lost_sales)
+        rewards = self._compute_rewards(shipment_counts, lost_sales)
 
         self.timestep += 1
         if self.timestep >= self.episode_length:
@@ -221,13 +221,18 @@ class InventoryEnv(ParallelEnv):
             lead_times = self.lead_time_sampler.sample(n_skus=self.n_skus) # [K]
             self.pipeline[agent_id, np.arange(self.n_skus), self.timestep + lead_times] += reorder_qty
 
-    def _compute_rewards(self, shipped, lost_sales):
+    def _compute_rewards(self, shipment_counts, lost_sales):
 
-        shipping_costs = (shipped * self.shipment_costs[:, :, None]).sum(axis=(1,2)) # [W_from]
+        # TODO: decide how to make the reward computation modular to decide on per-agent or total costs
 
-        holding_costs = (self.inventory * self.holding_costs).sum(axis=1)
 
-        lost_sales_costs = (lost_sales * self.lost_sales_costs).sum(axis=1)
+        shipping_costs = (shipment_counts * self.shipment_costs).sum()
+
+        # TODO: if holding costs per sku, remove .sum(axis=1) and validate holding_costs to be of size (n_skus,)
+        holding_costs = (self.inventory.sum(axis=1) * self.holding_costs).sum()
+
+        # TODO: decide if I want to keep lost_sales per warehouse and not per demand region
+        lost_sales_costs = (lost_sales * self.lost_sales_costs).sum()
 
         total_costs = shipping_costs + holding_costs + lost_sales_costs
 

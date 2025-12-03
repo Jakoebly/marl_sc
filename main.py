@@ -8,7 +8,6 @@ def main():
     # Set seeds
     set_seed(SEED)
     env_cfg = load_config(ENV_CFG_PATH)
-    print("Success")
 
     env = InventoryEnv(env_config=env_cfg)
 

@@ -45,7 +45,7 @@ def _validate_core_env_fields(env_config):
     """Validates the core fields of the environment config for presence and type"""
 
     # Check required scalar fields for presence and type
-    for field in ["n_warehouses", "n_skus","episode_length"]:
+    for field in ["n_warehouses", "n_regions", "n_skus","episode_length"]:
         if field not in env_config:
             raise ValueError(f"Missing required field {field} in env_config.")
         value = env_config[field]
@@ -53,6 +53,7 @@ def _validate_core_env_fields(env_config):
             raise ValueError(f"Field {field} in env_config must be a positive integer, got {value}.")
 
     n_warehouses = env_config["n_warehouses"]
+    n_regions = env_config["n_regions"]
 
     # Check initial inventory parameters for type
     if "init_inv_mean" in env_config:
@@ -70,17 +71,23 @@ def _validate_core_env_fields(env_config):
 
     # Check cost fields for type and shape
     for cost in ["holding_costs", "lost_sales_costs", "shipment_costs"]:
+        if cost not in env_config:
+            raise ValueError(f"Missing required field {cost} in env_config.")
         cost_array = np.asarray(env_config[cost])
         if not np.issubdtype(cost_array.dtype, np.number) or np.any(cost_array < 0):
             raise ValueError(f"{cost} in env_config must be positive number(s), got {cost_array}")
-        if cost == "shipment_costs" and cost_array.shape != (n_warehouses, n_warehouses):
-            raise ValueError(
-                f"{cost} must have shape scalar () or (n_warehouses, n_warehouses)={(n_warehouses, n_warehouses)}, "
-                f" got {cost_array.shape}."
-            )
-        if cost != "shipment_costs" and cost_array.shape not in [(), (n_warehouses,)]:
+        if cost == "holding_costs" and cost_array.shape not in [(), (n_warehouses,)]:
             raise ValueError(
                 f"{cost} must have shape scalar () or (n_warehouses,)={(n_warehouses, )}, got {cost_array.shape}."
+            )
+        if cost == "shipment_costs" and cost_array.shape != (n_warehouses, n_regions):
+            raise ValueError(
+                f"{cost} must have shape scalar () or (n_warehouses, n_regions)={(n_warehouses, n_regions)}, "
+                f" got {cost_array.shape}."
+            )
+        if cost == "lost_sales_costs" and cost_array.shape not in [(), (n_regions,)]:
+            raise ValueError(
+                f"{cost} must have shape scalar () or (n_regions,)={(n_regions, )}, got {cost_array.shape}."
             )
 
 def _validate_env_component(component, registry, env_config):
@@ -101,7 +108,6 @@ def _validate_env_component(component, registry, env_config):
 
     # Check if all required parameters for the component model are provided
     required_params = model_specs.get("required_params") or []
-    print(required_params)
     missing = [param for param in required_params if param not in comp_config]
     if missing:
         raise ValueError(
@@ -110,7 +116,8 @@ def _validate_env_component(component, registry, env_config):
         )
 
     # Check that no other parameters are provided
-    allowed = ["model"] + required_params
+    optional_params = model_specs.get("optional_params") or []
+    allowed = ["model"] + required_params + optional_params
     unknown = [param for param in comp_config.keys() if param not in allowed]
     if unknown:
         raise ValueError(
@@ -118,7 +125,7 @@ def _validate_env_component(component, registry, env_config):
             f"Allowed parameter(s): {allowed}."
         )
 
-    params = {name: comp_config[name] for name in comp_config}
+    params = {name: comp_config[name] for name in comp_config if name != "model"}
 
     # Validate model-specific parameters for shape and type consistency, if present
     validate = cast(Optional[Callable[[dict, dict], None]], model_specs["validate"])

@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 import numpy as np
-from data.demand_schema import OrdersBatch
+from env.schemas import OrdersBatch
 
 class BaseDemandSampler(ABC):
-    """Base class for all demand samplers. Contains general attributes and methods."""
     def __init__(self, env_config):
 
         # Set general attributes
         self.n_warehouses = env_config["n_warehouses"]
+        self.n_regions = env_config["n_regions"]
         self.n_skus = env_config["n_skus"]
         self.shipment_costs = np.asarray(env_config["shipment_costs"])
         self.episode_length = env_config["episode_length"]
@@ -19,7 +19,7 @@ class BaseDemandSampler(ABC):
     def sample_timestep(self, timestep):
         raise NotImplementedError
 
-class EmpiricalDemandSampler(BaseDemandSampler):
+class EmpiricalSampler(BaseDemandSampler):
     def __init__(self, env_config, historical_orders):
 
         # Initialize base class
@@ -70,7 +70,7 @@ class EmpiricalDemandSampler(BaseDemandSampler):
         # Return the corresponding OrderBatch from historical orders
         return self.historical_orders[idx]
 
-class PoissonDemandSampler(BaseDemandSampler):
+class PoissonSampler(BaseDemandSampler):
     def __init__(self, env_config, lambda_orders, lambda_skus):
         # Initialize base class
         super().__init__(env_config)
@@ -92,7 +92,7 @@ class PoissonDemandSampler(BaseDemandSampler):
         n_orders = np.random.poisson(self.lambda_orders)
 
         # Assign each order a random demand region
-        order_regions = np.random.randint(0, self.n_warehouses, size=n_orders)
+        order_regions = np.random.randint(0, self.n_regions, size=n_orders)
 
         # Sample random SKU demand for each order
         orders = np.random.poisson(self.lambda_skus, size=(n_orders, self.n_skus))
@@ -130,14 +130,18 @@ def _validate_poisson_sampler(params, env_config):
 
 DEMAND_SAMPLER_REGISTRY = {
     "Empirical": {
-        "cls": EmpiricalDemandSampler,
+        "cls": EmpiricalSampler,
         "required_params": [],
-        "validate": None
+        "optional_params": [],
+        "validate": None,
+        "desc": "Samples demand from historical orders."
     },
     "Poisson": {
-        "cls": PoissonDemandSampler,
+        "cls": PoissonSampler,
         "required_params": ["lambda_orders", "lambda_skus"],
-        "validate": _validate_poisson_sampler
+        "optional_params": [],
+        "validate": _validate_poisson_sampler,
+        "desc": "Samples demand from Poisson order number and SKU rates."
     }
 }
 

@@ -1,26 +1,28 @@
 type: env
 
 n_warehouses: 3
+n_regions: 3
 n_skus: 5
 episode_length: 365
 
-init_inv_mean: 10
-init_inv_std: 2
+init_inv_mean: 1
+init_inv_std: 3
 
-holding_costs: [1, 2, 3]
-lost_sales_costs: 5.0
+holding_costs: [1.0, 1.5, 2.0]
+lost_sales_costs: 20
 shipment_costs:
-    - [0.0, 1.0, 2.0]
-    - [1.0, 0.0, 1.0]
-    - [2.0, 1.0, 0.0]
+    - [0.5, 1.0, 2.0]
+    - [1.0, 0.5, 1.0]
+    - [2.0, 1.0, 0.5]
 
 demand_sampler:
   model: Poisson
   lambda_orders: 10
-  lambda_skus: [1,1,1,1,1]
+  lambda_skus: [0.5, 1.0, 2.0, 0.2, 3.0]
 
 demand_allocator:
   model: Greedy
+  max_splits: 2
 
 lead_time_sampler:
   model: Gamma
