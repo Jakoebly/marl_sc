@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
 import numpy as np
+import pickle
 from env.schemas import OrdersBatch
+from src.settings import DATA_PATH
 
 class BaseDemandSampler(ABC):
     def __init__(self, env_config):
@@ -9,7 +12,6 @@ class BaseDemandSampler(ABC):
         self.n_warehouses = env_config["n_warehouses"]
         self.n_regions = env_config["n_regions"]
         self.n_skus = env_config["n_skus"]
-        self.shipment_costs = np.asarray(env_config["shipment_costs"])
         self.episode_length = env_config["episode_length"]
 
     def reset(self, episode_length):
@@ -20,21 +22,41 @@ class BaseDemandSampler(ABC):
         raise NotImplementedError
 
 class EmpiricalSampler(BaseDemandSampler):
-    def __init__(self, env_config, historical_orders):
+    def __init__(self, env_config, data_path=None):
 
         # Initialize base class
         super().__init__(env_config)
 
-        # TODO: historical_orders should be the result of demand preprocessing
-        # Set historical orders as a list that contains all orders for each available
-        # timestep in the data stored as type OrderBatch
-        self.historical_orders = historical_orders
+        # Set the data path where historical orders are stored
+        self.data_path = Path(data_path if data_path is not None else DATA_PATH)
+
+        # TODO: Uncomment when preprocessing is implemented
+        # Load the historical orders
+        self.historical_orders = self._load_historical_orders(data_path)
 
         # Get the number of total number of timesteps that are available in the data
         self.timesteps_data = len(self.historical_orders)
 
         # Initialize the sample window start index
         self._window_start_idx = None
+
+    @staticmethod
+    def _load_historical_orders(path):
+
+        # Load the pickle object
+        with open(path, "rb") as file:
+            historical_orders = pickle.load(file)
+
+        # Check if historical_orders is a list
+        if not isinstance(historical_orders, list):
+            raise TypeError(f"historical_orders must be list[OrdersBatch], got {type(historical_orders)}")
+
+        # Check if historical_orders contains only OrderBatch elements
+        for i, item in enumerate(historical_orders):
+            if not isinstance(item, OrdersBatch):
+                raise ValueError(f"Element {i} in historical_orders is not OrdersBatch, got {type(item)}")
+
+        return historical_orders
 
     def reset(self, episode_length):
         """Resets the empirical demand sampler at the beginning of an episode."""
@@ -43,7 +65,7 @@ class EmpiricalSampler(BaseDemandSampler):
         super().reset(episode_length)
 
         # Ensure that episode_length does not exceed the available timesteps in the data
-        if episode_length >= self.timesteps_data:
+        if episode_length > self.timesteps_data:
             raise ValueError(
                 f"episode_length must be smaller than the available data of size {self.timesteps_data}, "
                 f"got {episode_length}"
@@ -105,6 +127,25 @@ class PoissonSampler(BaseDemandSampler):
         # Return the demand as OrderBatch
         return OrdersBatch(orders=orders, order_regions=order_regions)
 
+def _validate_empirical_sampler(params, env_config):
+    """Validates parameters of the empirical sampler for type and shape."""
+
+    # Check if the optional data_path parameter and the default value are path-like
+    data_path = params["data_path"] if "data_path" in params else DATA_PATH
+    if not isinstance(data_path, (str, Path)):
+        raise ValueError(f"specified or default data_path must be path-like / string, got {data_path}")
+
+    # Set data_path as a Path
+    data_path = Path(data_path)
+
+    # TODO: uncomment if preprocessing is implemented
+    # Check if the specified data file exists
+    #if not data_path.is_file():
+    #    raise ValueError(
+    #        f"Empirical demand_sampler expects historical_orders file at: {data_path}, but no such file was found. "
+    #        f"Run preprocessing first."
+    #    )
+
 def _validate_poisson_sampler(params, env_config):
     """Validates required parameters of the Poisson sampler for type and shape."""
 
@@ -132,9 +173,9 @@ DEMAND_SAMPLER_REGISTRY = {
     "Empirical": {
         "cls": EmpiricalSampler,
         "required_params": [],
-        "optional_params": [],
-        "validate": None,
-        "desc": "Samples demand from historical orders."
+        "optional_params": ["data_path"],
+        "validate": _validate_empirical_sampler,
+        "desc": "Samples demand from historical orders. If data_path is not provided, defaults to DATA_PATH from src.settings."
     },
     "Poisson": {
         "cls": PoissonSampler,

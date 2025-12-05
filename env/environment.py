@@ -28,8 +28,10 @@ class InventoryEnv(ParallelEnv):
         self.demand_allocator = build_demand_allocator(env_config)
         # self.lead_time_sampler = build_lead_time_sampler(env_config)
 
-        # TODO: specify cost parameters
+        # TODO: specify reward and cost parameters
         # Costs
+        # TODO: add to config and validation logic
+        self.reward_type = env_config.get("reward_type", "total")
         self.holding_costs = env_config.get("holding_costs", 1.0)
         self.lost_sales_costs = env_config.get("lost_sales_costs", 2.0)
         self.shipment_costs = env_config.get("shipment_costs", 0.0)
@@ -50,6 +52,7 @@ class InventoryEnv(ParallelEnv):
         # State information
         self.inventory = None
         self.pipeline = None
+        self.pipeline_total = None
         self.timestep  = None
         self.terminated = False
 
@@ -73,6 +76,7 @@ class InventoryEnv(ParallelEnv):
 
         # Reset pipeline
         self.pipeline = np.zeros((self.n_warehouses, self.n_skus, self.episode_length), dtype=np.int64)
+        self.pipeline_total = np.zeros((self.n_warehouses, self.n_skus), dtype=np.int64)
 
         # Reset demand sampler
         self.demand_sampler.reset(self.episode_length)
@@ -190,15 +194,13 @@ class InventoryEnv(ParallelEnv):
     def _get_observations(self):
 
         # TODO: Add more observations
-        pipeline_total = self.pipeline.sum(axis=2)
-
-        timestep_norm = np.array([self.timestep / max(self.episode_length - 1, 1)]).astype(np.float32)
+        timestep_norm = np.array([self.timestep / max(self.episode_length, 1)]).astype(np.float32)
 
         obs = {}
 
         for agent_id, agent in enumerate(self.agents):
             inv = self.inventory[agent_id]
-            pipe = pipeline_total[agent_id]
+            pipe = self.pipeline_total[agent_id]
             obs[agent] = np.concatenate([inv, pipe, timestep_norm]).astype(np.float32)
         return obs
 
@@ -209,6 +211,7 @@ class InventoryEnv(ParallelEnv):
         arrivals = self.pipeline[..., self.timestep]
         self.inventory += arrivals
         self.pipeline[..., self.timestep] = 0
+        self.pipeline_total -= arrivals
 
     def _apply_actions(self, actions):
 
@@ -220,11 +223,13 @@ class InventoryEnv(ParallelEnv):
             #  --> there should be one lt dist per SKU, if dists are different per SKU, then handled in lead time model
             lead_times = self.lead_time_sampler.sample(n_skus=self.n_skus) # [K]
             self.pipeline[agent_id, np.arange(self.n_skus), self.timestep + lead_times] += reorder_qty
+            self.pipeline_total[agent_id] += reorder_qty
 
     def _compute_rewards(self, shipment_counts, lost_sales):
 
         # TODO: decide how to make the reward computation modular to decide on per-agent or total costs
-
+        # TODO: maybe add a class BaseRewardFunction with registry of function types, if I need to consider
+        #  multiple functions
 
         shipping_costs = (shipment_counts * self.shipment_costs).sum()
 
@@ -236,7 +241,7 @@ class InventoryEnv(ParallelEnv):
 
         total_costs = shipping_costs + holding_costs + lost_sales_costs
 
-        rewards = {agent: {float(-total_costs)} for agent in self.agents}
+        rewards = {agent: float(-total_costs) for agent in self.agents}
 
         return rewards
 

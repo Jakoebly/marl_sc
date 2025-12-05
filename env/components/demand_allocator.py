@@ -11,8 +11,7 @@ class BaseDemandAllocator(ABC):
 
         # Set general attributes
         self.n_warehouses = env_config["n_warehouses"]
-        # TODO: implement n_regions in the env_config including validation
-        self.n_regions = self.n_warehouses
+        self.n_regions = env_config["n_regions"]
         self.n_skus = env_config["n_skus"]
         self.shipment_costs = np.asarray(env_config["shipment_costs"])
 
@@ -27,10 +26,10 @@ class GreedyAllocator(BaseDemandAllocator):
         super().__init__(env_config)
 
         # Set maximum number of allowed splits
-        if max_splits is None:
-            self.max_splits = self.n_warehouses - 1
-        else:
-            self.max_splits = max_splits
+        self.max_splits = self.n_warehouses - 1 if max_splits is None else max_splits
+
+        # Sort warehouses by shipment_costs per region
+        self.warehouses_sorted_per_region = np.argsort(self.shipment_costs, axis=0)
 
     def allocate(self, inventory, demand):
         """Allocates orders greedily by shipment cost with a cap on warehouse splitting per order."""
@@ -52,21 +51,23 @@ class GreedyAllocator(BaseDemandAllocator):
 
         for region in range(self.n_regions):
 
-            # Fetch all orders from the given region
+            # Fetch all orders from the current region
             orders_per_region = orders[order_regions == region]
 
             # If a region has no orders, move to the next region
             if orders_per_region.size == 0:
                 continue
 
-            # Sort warehouses by shipment costs to the given region
-            warehouses_sorted = np.argsort(self.shipment_costs[:, region], axis=0)
+            # Sort warehouses by shipment costs to the current region
+            warehouses_sorted = self.warehouses_sorted_per_region[:, region]
 
-            # Loop over all orders associated with the given region and allocate demands to warehouses
+            # Loop over all orders associated with the current region and allocate demands to warehouses
             for order in orders_per_region:
-                order = order.copy()
 
-                # Track how many warehouses already ship for the given order
+                # Track remaining SKU demand in the current order
+                remaining = order.copy()
+
+                # Track how many warehouses already ship for the current order
                 used_warehouses = 0
 
                 for warehouse in warehouses_sorted:
@@ -75,31 +76,30 @@ class GreedyAllocator(BaseDemandAllocator):
                     if used_warehouses >= max_warehouses_per_order:
                         break
 
-                    # Determine the quantity per SKU that the given warehouse can fulfill for the given order
-                    fulfillment_qty = np.minimum(order, inventory[warehouse])
+                    # Determine the quantity per SKU that the current warehouse can fulfill for the current order
+                    fulfillment_qty = np.minimum(remaining, inventory[warehouse])
 
-                    # The given warehouse cannot fulfill anything from this order, move to the next cheapest warehouse
-                    if not np.any(fulfillment_qty > 0):
-                        continue
+                    # Only continue if the current warehouse can fulfill something from the current order
+                    if np.any(fulfillment_qty > 0):
 
-                    # The given warehouse ships what it can contribute
-                    shipped_skus[warehouse, region] += fulfillment_qty
-                    shipment_counts[warehouse, region] += 1
+                        # The current warehouse ships what it can contribute
+                        shipped_skus[warehouse, region] += fulfillment_qty
+                        shipment_counts[warehouse, region] += 1
 
-                    # Remaining SKU demands and inventory is updated
-                    order -= fulfillment_qty
-                    inventory[warehouse] -= fulfillment_qty
-                    used_warehouses += 1
+                        # Remaining SKU demands and inventory is updated
+                        remaining -= fulfillment_qty
+                        inventory[warehouse] -= fulfillment_qty
+                        used_warehouses += 1
 
-                    # If no SKU demand is left, move to the next order
-                    if not np.any(order > 0):
-                        break
+                        # If no SKU demand is left, move to the next order
+                        if not np.any(remaining > 0):
+                            break
 
                 # Check if there are remaining SKU demands and add them as lost sales for the cheapest warehouse
-                remaining = order > 0
-                if np.any(remaining):
+                if np.any(remaining > 0):
                     cheapest_warehouse = warehouses_sorted[0]
-                    lost_sales[cheapest_warehouse, remaining] += order[remaining]
+                    remaining_mask = remaining > 0
+                    lost_sales[cheapest_warehouse, remaining_mask] += order[remaining_mask > 0]
 
         return AllocationResults(
             shipped_skus=shipped_skus,
@@ -108,7 +108,7 @@ class GreedyAllocator(BaseDemandAllocator):
         )
 
 def _validate_greedy_allocator(params, env_config):
-    """Validates required parameters of the GreedyMaxSplits allocator for type and shape."""
+    """Validates parameters of the Greedy allocator for type and shape."""
 
     # If the optional max_splits parameter is not given, return
     if params == {}:

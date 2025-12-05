@@ -60,13 +60,13 @@ def _validate_core_env_fields(env_config):
         if not isinstance(env_config["init_inv_mean"], (int,float)):
             raise ValueError(
                 f"init_inv_mean in env_config must be a number, "
-                f"got {env_config["init_inv_mean"]}."
+                f"got {env_config['init_inv_mean']}."
                 )
     if "init_inv_std" in env_config:
         if not isinstance(env_config["init_inv_std"], (int,float)) or env_config["init_inv_std"] < 0:
             raise ValueError(
-                f"init_inv_mean in env_config must be a non-negative number, "
-                f"got {env_config["init_inv_std"]}."
+                f"init_inv_std in env_config must be a non-negative number, "
+                f"got {env_config['init_inv_std']}."
                 )
 
     # Check cost fields for type and shape
@@ -82,12 +82,12 @@ def _validate_core_env_fields(env_config):
             )
         if cost == "shipment_costs" and cost_array.shape != (n_warehouses, n_regions):
             raise ValueError(
-                f"{cost} must have shape scalar () or (n_warehouses, n_regions)={(n_warehouses, n_regions)}, "
+                f"{cost} must have shape (n_warehouses, n_regions)={(n_warehouses, n_regions)}, "
                 f" got {cost_array.shape}."
             )
-        if cost == "lost_sales_costs" and cost_array.shape not in [(), (n_regions,)]:
+        if cost == "lost_sales_costs" and cost_array.shape not in [(), (n_warehouses,)]:
             raise ValueError(
-                f"{cost} must have shape scalar () or (n_regions,)={(n_regions, )}, got {cost_array.shape}."
+                f"{cost} must have shape scalar () or (n_warehouses,)={(n_warehouses, )}, got {cost_array.shape}."
             )
 
 def _validate_env_component(component, registry, env_config):
