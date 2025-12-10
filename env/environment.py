@@ -7,9 +7,10 @@ import numpy as np
 from pettingzoo.utils import ParallelEnv
 from gymnasium import spaces
 
-from env.components.demand_sampler import build_demand_sampler
-from env.components.demand_allocator import build_demand_allocator
+from env.components.processes.demand_sampler import build_demand_sampler
+from env.components.processes.demand_allocator import build_demand_allocator
 # from components.lead_time_sampler import build_lead_time_sampler
+from env.components.rewards.rewards import build_reward_function
 
 class InventoryEnv(ParallelEnv):
 
@@ -18,28 +19,28 @@ class InventoryEnv(ParallelEnv):
     def __init__(self, env_config):
 
         # General attributes
-        self.n_warehouses = env_config["n_warehouses"]
-        self.n_skus = env_config["n_skus"]
-        self.episode_length = env_config.get("episode_length", 365)
+        self.n_warehouses = env_config["general"]["n_warehouses"]
+        self.n_skus = env_config["general"]["n_skus"]
+        self.episode_length = env_config["general"].get("episode_length", 365)
 
         # TODO: Add lead_time_sampler
         # External components
         self.demand_sampler = build_demand_sampler(env_config)
         self.demand_allocator = build_demand_allocator(env_config)
         # self.lead_time_sampler = build_lead_time_sampler(env_config)
+        self.reward_function = build_reward_function(env_config)
 
         # TODO: specify reward and cost parameters
         # Costs
         # TODO: add to config and validation logic
-        self.reward_type = env_config.get("reward_type", "total")
-        self.holding_costs = env_config.get("holding_costs", 1.0)
-        self.lost_sales_costs = env_config.get("lost_sales_costs", 2.0)
-        self.shipment_costs = env_config.get("shipment_costs", 0.0)
+        self.holding_costs = env_config["costs"].get("holding_costs", 1.0)
+        self.lost_sales_costs = env_config["costs"].get("lost_sales_costs", 2.0)
+        self.shipment_costs = env_config["costs"].get("shipment_costs", 0.0)
 
         # TODO: decide whether to keep initial inventory as normal distribution
         # Initial inventory distribution parameters
-        self.init_inv_mean = env_config.get("init_inv_mean", 10)
-        self.init_inv_std = env_config.get("init_inv_std", 2)
+        self.init_inv_mean = env_config["general"].get("init_inv_mean", 10)
+        self.init_inv_std = env_config["general"].get("init_inv_std", 2)
 
         # Agent information
         self.possible_agents = [f"warehouse_{i}" for i in range(self.n_warehouses)]
@@ -120,14 +121,19 @@ class InventoryEnv(ParallelEnv):
         shipped_skus = alloc_results.shipped_skus
         shipped_per_wh = shipped_skus.sum(axis=1)
         shipment_counts = alloc_results.shipment_counts
-        lost_sales = alloc_results.lost_sales
-
+        lost_sales_region = alloc_results.lost_sales_region
 
         # Apply shipments
         self.inventory = np.maximum(self.inventory - shipped_per_wh, 0)
 
         # Compute rewards
-        rewards = self._compute_rewards(shipment_counts, lost_sales)
+        rewards = self.reward_function.compute(
+            inventory=self.inventory,
+            shipped_skus=shipped_skus,
+            shipment_counts=shipment_counts,
+            lost_sales_region=lost_sales_region,
+            agents=self.agents
+        )
 
         self.timestep += 1
         if self.timestep >= self.episode_length:
@@ -224,26 +230,6 @@ class InventoryEnv(ParallelEnv):
             lead_times = self.lead_time_sampler.sample(n_skus=self.n_skus) # [K]
             self.pipeline[agent_id, np.arange(self.n_skus), self.timestep + lead_times] += reorder_qty
             self.pipeline_total[agent_id] += reorder_qty
-
-    def _compute_rewards(self, shipment_counts, lost_sales):
-
-        # TODO: decide how to make the reward computation modular to decide on per-agent or total costs
-        # TODO: maybe add a class BaseRewardFunction with registry of function types, if I need to consider
-        #  multiple functions
-
-        shipping_costs = (shipment_counts * self.shipment_costs).sum()
-
-        # TODO: if holding costs per sku, remove .sum(axis=1) and validate holding_costs to be of size (n_skus,)
-        holding_costs = (self.inventory.sum(axis=1) * self.holding_costs).sum()
-
-        # TODO: decide if I want to keep lost_sales per warehouse and not per demand region
-        lost_sales_costs = (lost_sales * self.lost_sales_costs).sum()
-
-        total_costs = shipping_costs + holding_costs + lost_sales_costs
-
-        rewards = {agent: float(-total_costs) for agent in self.agents}
-
-        return rewards
 
     def render(self):
 

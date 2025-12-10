@@ -3,16 +3,18 @@ from pathlib import Path
 import numpy as np
 import pickle
 from env.schemas import OrdersBatch
+from env.components.components import validate_env_component
 from src.settings import DATA_PATH
 
 class BaseDemandSampler(ABC):
     def __init__(self, env_config):
 
         # Set general attributes
-        self.n_warehouses = env_config["n_warehouses"]
-        self.n_regions = env_config["n_regions"]
-        self.n_skus = env_config["n_skus"]
-        self.episode_length = env_config["episode_length"]
+        general_fields = env_config["general"]
+        self.n_warehouses = general_fields["n_warehouses"]
+        self.n_regions = general_fields["n_regions"]
+        self.n_skus = general_fields["n_skus"]
+        self.episode_length = general_fields["episode_length"]
 
     def reset(self, episode_length):
         self.episode_length = episode_length
@@ -22,15 +24,14 @@ class BaseDemandSampler(ABC):
         raise NotImplementedError
 
 class EmpiricalSampler(BaseDemandSampler):
-    def __init__(self, env_config, data_path=None):
+    def __init__(self, env_config, data_path, **kwargs):
 
         # Initialize base class
         super().__init__(env_config)
 
         # Set the data path where historical orders are stored
-        self.data_path = Path(data_path if data_path is not None else DATA_PATH)
+        self.data_path = Path(DATA_PATH if data_path == 'default' else data_path)
 
-        # TODO: Uncomment when preprocessing is implemented
         # Load the historical orders
         self.historical_orders = self._load_historical_orders(data_path)
 
@@ -42,6 +43,7 @@ class EmpiricalSampler(BaseDemandSampler):
 
     @staticmethod
     def _load_historical_orders(path):
+        """Loads historical orders from a data path."""
 
         # Load the pickle object
         with open(path, "rb") as file:
@@ -93,7 +95,7 @@ class EmpiricalSampler(BaseDemandSampler):
         return self.historical_orders[idx]
 
 class PoissonSampler(BaseDemandSampler):
-    def __init__(self, env_config, lambda_orders, lambda_skus):
+    def __init__(self, env_config, lambda_orders, lambda_skus, **kwargs):
         # Initialize base class
         super().__init__(env_config)
 
@@ -127,18 +129,29 @@ class PoissonSampler(BaseDemandSampler):
         # Return the demand as OrderBatch
         return OrdersBatch(orders=orders, order_regions=order_regions)
 
+def _validate_demand_sampler(env_config):
+    """Validates the demand sampler section in the env_config."""
+
+    # Validate the demand sampler component based on its registry and config (no sampler-specific extra fields)
+    validate_env_component(
+        component_group="processes",
+        component_name="demand_sampler",
+        registry=DEMAND_SAMPLER_REGISTRY,
+        env_config=env_config,
+        extra_params=None
+    )
+
 def _validate_empirical_sampler(params, env_config):
-    """Validates parameters of the empirical sampler for type and shape."""
+    """Validates parameters of the Empirical sampler for type and shape."""
 
-    # Check if the optional data_path parameter and the default value are path-like
-    data_path = params["data_path"] if "data_path" in params else DATA_PATH
-    if not isinstance(data_path, (str, Path)):
-        raise ValueError(f"specified or default data_path must be path-like / string, got {data_path}")
+    # Check if the data_path parameter is path-like
+    data_path = DATA_PATH if params["data_path"] == 'default' else params["data_path"]
+    try:
+        data_path = Path(data_path).expanduser()
+    except (TypeError, ValueError):
+        raise ValueError(f"data_path must be path-like or 'default', got {data_path}")
 
-    # Set data_path as a Path
-    data_path = Path(data_path)
-
-    # TODO: uncomment if preprocessing is implemented
+    # TODO: uncomment when preprocessing is implemented
     # Check if the specified data file exists
     #if not data_path.is_file():
     #    raise ValueError(
@@ -147,10 +160,10 @@ def _validate_empirical_sampler(params, env_config):
     #    )
 
 def _validate_poisson_sampler(params, env_config):
-    """Validates required parameters of the Poisson sampler for type and shape."""
+    """Validates parameters of the Poisson sampler for type and shape."""
 
     # Set values
-    n_skus = env_config["n_skus"]
+    n_skus = env_config["general"]["n_skus"]
     lambda_orders = np.asarray(params["lambda_orders"])
     lambda_skus = np.asarray(params["lambda_skus"])
 
@@ -169,25 +182,37 @@ def _validate_poisson_sampler(params, env_config):
             f"got {lambda_skus.shape}."
         )
 
+
+# Registry for sampler models
 DEMAND_SAMPLER_REGISTRY = {
     "Empirical": {
         "cls": EmpiricalSampler,
-        "required_params": [],
-        "optional_params": ["data_path"],
+        "params": ["data_path"],
         "validate": _validate_empirical_sampler,
-        "desc": "Samples demand from historical orders. If data_path is not provided, defaults to DATA_PATH from src.settings."
+        "desc": "Samples demand from historical orders. "
+                "If data_path is set to 'default', uses DATA_PATH from src.settings."
     },
     "Poisson": {
         "cls": PoissonSampler,
-        "required_params": ["lambda_orders", "lambda_skus"],
-        "optional_params": [],
+        "params": ["lambda_orders", "lambda_skus"],
         "validate": _validate_poisson_sampler,
         "desc": "Samples demand from Poisson order number and SKU rates."
     }
 }
 
 def build_demand_sampler(env_config):
+    """Validates and builds the demand sampler specified in the env_config"""
+
+    # Validate demand_sampler section in env_config
+    _validate_demand_sampler(env_config)
+
+    # Build demand sampler
     from env.components.components import build_env_component
-    return build_env_component(component="demand_sampler", registry=DEMAND_SAMPLER_REGISTRY, env_config=env_config)
+    return build_env_component(
+        component_group="processes",
+        component="demand_sampler",
+        registry=DEMAND_SAMPLER_REGISTRY,
+        env_config=env_config
+    )
 
 

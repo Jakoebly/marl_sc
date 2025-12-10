@@ -1,34 +1,56 @@
 type: env
 
-n_warehouses: 3
-n_regions: 3
-n_skus: 5
-episode_length: 365
+general:
+  n_warehouses: 3
+  n_regions: 3
+  n_skus: 5
+  episode_length: 365
 
-init_inv_mean: 1
-init_inv_std: 3
+  init_inv_mean: 1
+  init_inv_std: 3
 
-holding_costs: [1.0, 1.5, 2.0]
-lost_sales_costs: 20
-shipment_costs:
-    - [0.5, 1.0, 2.0]
-    - [1.0, 0.5, 1.0]
-    - [2.0, 1.0, 0.5]
+costs:
+  holding_costs: [1.0, 1.5, 2.0]
+  lost_sales_costs: 1
+  shipment_costs:
+      - [0.5, 1.0, 2.0]
+      - [1.0, 0.5, 1.0]
+      - [2.0, 1.0, 0.5]
 
-demand_sampler:
-  model: Poisson
-  lambda_orders: 10
-  lambda_skus: [0.5, 1.0, 2.0, 0.2, 3.0]
+components:
+  processes:
+    demand_sampler:
+      model: Poisson
+      lambda_orders: 10
+      lambda_skus: [0.5, 1.0, 2.0, 0.2, 3.0]
 
-demand_allocator:
-  model: Greedy
-  max_splits: 2
+    demand_allocator:
+      model: Greedy
+      max_splits: 2
 
-lead_time_sampler:
-  model: Gamma
-  max_lead_time: 10
-  alpha: 2.0
-  beta: 1.0
+    lead_time_sampler:
+      model: Gamma
+      max_lead_time: 10
+      alpha: 2.0
+      beta: 1.0
+
+  reward:
+    reward:
+      model: InventoryCosts
+      scope: agent
+      normalize: false
+      scale: 1.0
+
+      cost_weights:
+        w_holding_costs: 0.3333
+        w_lost_sales_costs: 0.3333
+        w_shipment_costs: 0.3333
+
+      lost_sales_assignment:
+        model: Null
+
+
+
 
 
 

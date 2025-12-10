@@ -10,4 +10,4 @@ class OrdersBatch:
 class AllocationResults:
     shipped_skus: np.ndarray
     shipment_counts: np.ndarray
-    lost_sales: np.ndarray
+    lost_sales_region: np.ndarray
